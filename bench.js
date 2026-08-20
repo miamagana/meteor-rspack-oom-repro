@@ -18,29 +18,23 @@ const label = process.argv[2] || 'run';
 const excludeIdx = process.argv.indexOf('--exclude');
 const exclude = excludeIdx > -1 ? process.argv[excludeIdx + 1] : '';
 
-function treeRssMB(rootPid) {
-  // Sum RSS (KB) of rootPid and all descendants, return MB.
+function toolRssMB() {
+  // RSS (MB) of the Meteor build-tool node process specifically. The linker /
+  // source-map / minifier all run in this process, and its heap is what the 2GB
+  // cap bounds. Summing the whole tree would be dominated by the separate rspack
+  // (rust) process, which is irrelevant to the linker OOM.
   let rows;
   try {
-    rows = execSync('ps -A -o pid=,ppid=,rss=', { encoding: 'utf8' }).trim().split('\n');
+    rows = execSync('ps -A -ww -o rss=,command=', { encoding: 'utf8' }).split('\n');
   } catch { return 0; }
-  const kids = new Map();
-  const rss = new Map();
+  let max = 0;
   for (const line of rows) {
-    const m = line.trim().split(/\s+/);
-    const pid = +m[0], ppid = +m[1], r = +m[2];
-    rss.set(pid, r);
-    if (!kids.has(ppid)) kids.set(ppid, []);
-    kids.get(ppid).push(pid);
+    if (line.includes('tools/index.js') && line.includes('meteor-checkout')) {
+      const m = line.trim().match(/^(\d+)\s+/);
+      if (m) max = Math.max(max, +m[1] / 1024);
+    }
   }
-  let total = 0;
-  const stack = [rootPid];
-  while (stack.length) {
-    const pid = stack.pop();
-    total += rss.get(pid) || 0;
-    for (const c of kids.get(pid) || []) stack.push(c);
-  }
-  return total / 1024;
+  return max;
 }
 
 function runOnce(mode) {
@@ -67,7 +61,7 @@ function runOnce(mode) {
     const t0 = Date.now();
     const child = spawn(METEOR, args, { cwd: APP, env });
     let peak = 0;
-    const poll = setInterval(() => { peak = Math.max(peak, treeRssMB(child.pid)); }, 250);
+    const poll = setInterval(() => { peak = Math.max(peak, toolRssMB()); }, 250);
     child.stdout.on('data', d => fs.writeSync(log, d));
     child.stderr.on('data', d => fs.writeSync(log, d));
     child.on('exit', code => {
