@@ -109,8 +109,9 @@ function extractProfile(logPath) {
 
 (async () => {
   if (process.env.WARM) { await runOnce('warm'); }
+  const modes = (process.env.MODES || 'normal,debug').split(',');
   const results = [];
-  for (const mode of ['normal', 'debug']) results.push(await runOnce(mode));
+  for (const mode of modes) results.push(await runOnce(mode));
   const summary = { label, meteor: METEOR, heapMB: +HEAP, exclude: exclude || null, results };
   console.log(JSON.stringify(summary, null, 2));
 })();
